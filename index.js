@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { createClient } = require('redis');
+const mongoose = require('mongoose'); 
 
 const app = express();
 const client = createClient({
@@ -12,9 +13,16 @@ const client = createClient({
 });
 const port = process.env.PORT || 5050;
 
+const DataSchema = new mongoose.Schema({
+    key: String,
+    value: String
+});
+const DataModel = mongoose.model('Data', DataSchema);
+
 (async () => {
     try {
         await client.connect();
+        await mongoose.connect('mongodb://localhost:27017');//, options);
 
         app.get('/', (req, res) => {
             res.status(200).send({
@@ -39,22 +47,21 @@ const port = process.env.PORT || 5050;
                     cached = {
                         data: cachedValue,
                         source: 'cache',
-                        duration: duration.toFixed(2) 
+                        duration: `${duration.toFixed(2)} ms`
                     };
                 }
-        
-                // Fetch from Redis to compare the time to get it 
-                const redisValue = await client.get(key);
+                // Fetch from Mongodb to test time
+                const mongoValue = await DataModel.findOne({ key }); // Assuming 'key' is unique
                 const end = process.hrtime(start);
                 const duration = end[0] * 1000 + end[1] / 1000000;
                 res.status(200).send({
                     cached: cached,
                     db: {
-                        data: redisValue,
-                        source: 'redis',
-                        duration: duration.toFixed(2)
+                        data: mongoValue? mongoValue.value : 'Not found',
+                        source: 'mongoDB',
+                        duration: `${duration.toFixed(2)} ms`
                     }
-                })
+                });
             } catch (err) {
                 res.status(500).send({
                     error: err.message
@@ -65,6 +72,8 @@ const port = process.env.PORT || 5050;
         app.get('/write/:key/:value', async (req, res) => {
             try {
                 await client.set(req.params.key, req.params.value);
+                const newData = new DataModel({ key: req.params.key, value: req.params.value });
+                await newData.save();
                 res.status(200).send({
                     status: 'OK'
                 });
@@ -83,7 +92,7 @@ const port = process.env.PORT || 5050;
         });
 
         app.listen(port, () => {
-            console.log("App successfully started on http://localhost:", port);
+            console.log(`App successfully started on PORT:${port}`);
         });
 
     } catch (err) {
